@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 680" font-family="'SF Mono', 'Fira Code', 'JetBrains Mono', Menlo, Monaco, monospace">
+  <defs>
+    <filter id="shadow" x="-2%" y="-2%" width="104%" height="108%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-opacity="0.15"/>
+    </filter>
+  </defs>
+
+  <!-- Terminal window -->
+  <rect width="820" height="680" rx="12" fill="#1e1e2e" filter="url(#shadow)"/>
+
+  <!-- Title bar -->
+  <rect width="820" height="40" rx="12" fill="#313244"/>
+  <rect y="28" width="820" height="12" fill="#313244"/>
+  <circle cx="24" cy="20" r="7" fill="#f38ba8"/>
+  <circle cx="48" cy="20" r="7" fill="#f9e2af"/>
+  <circle cx="72" cy="20" r="7" fill="#a6e3a1"/>
+  <text x="410" y="25" text-anchor="middle" font-size="13" fill="#a6adc8" font-weight="600">spring-idempotency-kit demo</text>
+
+  <!-- Prompt 1: First request -->
+  <text x="20" y="75" font-size="12" fill="#585b70">## 1. First request — creates payment</text>
+
+  <text x="20" y="100" font-size="13">
+    <tspan fill="#a6e3a1" font-weight="700">$</tspan>
+    <tspan fill="#cdd6f4"> curl -s -D- -X POST http://localhost:8080/payments \</tspan>
+  </text>
+  <text x="20" y="118" font-size="13">
+    <tspan fill="#cdd6f4">  -H </tspan><tspan fill="#f9e2af">"Content-Type: application/json"</tspan>
+    <tspan fill="#cdd6f4"> \</tspan>
+  </text>
+  <text x="20" y="136" font-size="13">
+    <tspan fill="#cdd6f4">  -H </tspan><tspan fill="#f9e2af">"Idempotency-Key: pay_abc123"</tspan>
+    <tspan fill="#cdd6f4"> \</tspan>
+  </text>
+  <text x="20" y="154" font-size="13">
+    <tspan fill="#cdd6f4">  -d </tspan><tspan fill="#f9e2af">'{"amount": 99.99, "currency": "USD"}'</tspan>
+  </text>
+
+  <!-- Response 1 -->
+  <text x="20" y="182" font-size="13">
+    <tspan fill="#89b4fa">HTTP/1.1</tspan><tspan fill="#a6e3a1" font-weight="700"> 200 OK</tspan>
+  </text>
+  <text x="20" y="206" font-size="13" fill="#94e2d5">{"id":"pm_7f3a","amount":99.99,"currency":"USD","status":"completed"}</text>
+
+  <!-- Divider -->
+  <line x1="20" y1="228" x2="800" y2="228" stroke="#45475a" stroke-width="1" stroke-dasharray="4 4"/>
+
+  <!-- Prompt 2: Duplicate request -->
+  <text x="20" y="258" font-size="12" fill="#585b70">## 2. Duplicate request — same Idempotency-Key, returns cached result</text>
+
+  <text x="20" y="283" font-size="13">
+    <tspan fill="#a6e3a1" font-weight="700">$</tspan>
+    <tspan fill="#cdd6f4"> curl -s -D- -X POST http://localhost:8080/payments \</tspan>
+  </text>
+  <text x="20" y="301" font-size="13">
+    <tspan fill="#cdd6f4">  -H </tspan><tspan fill="#f9e2af">"Content-Type: application/json"</tspan>
+    <tspan fill="#cdd6f4"> \</tspan>
+  </text>
+  <text x="20" y="319" font-size="13">
+    <tspan fill="#cdd6f4">  -H </tspan><tspan fill="#f9e2af">"Idempotency-Key: pay_abc123"</tspan>
+    <tspan fill="#cdd6f4"> \</tspan>
+  </text>
+  <text x="20" y="337" font-size="13">
+    <tspan fill="#cdd6f4">  -d </tspan><tspan fill="#f9e2af">'{"amount": 99.99, "currency": "USD"}'</tspan>
+  </text>
+
+  <!-- Response 2 -->
+  <text x="20" y="365" font-size="13">
+    <tspan fill="#89b4fa">HTTP/1.1</tspan><tspan fill="#a6e3a1" font-weight="700"> 200 OK</tspan>
+  </text>
+  <text x="20" y="389" font-size="13" fill="#94e2d5">{"id":"pm_7f3a","amount":99.99,"currency":"USD","status":"completed"}</text>
+
+  <!-- Callout: same response -->
+  <rect x="20" y="404" width="440" height="24" rx="4" fill="#a6e3a1" fill-opacity="0.12"/>
+  <text x="28" y="420" font-size="12" fill="#a6e3a1" font-weight="700">^ Same response, method NOT re-executed. Cached by Redis.</text>
+
+  <!-- Divider -->
+  <line x1="20" y1="442" x2="800" y2="442" stroke="#45475a" stroke-width="1" stroke-dasharray="4 4"/>
+
+  <!-- Prompt 3: Different key -->
+  <text x="20" y="472" font-size="12" fill="#585b70">## 3. New Idempotency-Key — new payment created</text>
+
+  <text x="20" y="497" font-size="13">
+    <tspan fill="#a6e3a1" font-weight="700">$</tspan>
+    <tspan fill="#cdd6f4"> curl -s -D- -X POST http://localhost:8080/payments \</tspan>
+  </text>
+  <text x="20" y="515" font-size="13">
+    <tspan fill="#cdd6f4">  -H </tspan><tspan fill="#f9e2af">"Content-Type: application/json"</tspan>
+    <tspan fill="#cdd6f4"> \</tspan>
+  </text>
+  <text x="20" y="533" font-size="13">
+    <tspan fill="#cdd6f4">  -H </tspan><tspan fill="#f9e2af">"Idempotency-Key: pay_xyz789"</tspan>
+    <tspan fill="#cdd6f4"> \</tspan>
+  </text>
+  <text x="20" y="551" font-size="13">
+    <tspan fill="#cdd6f4">  -d </tspan><tspan fill="#f9e2af">'{"amount": 49.00, "currency": "EUR"}'</tspan>
+  </text>
+
+  <!-- Response 3 -->
+  <text x="20" y="579" font-size="13">
+    <tspan fill="#89b4fa">HTTP/1.1</tspan><tspan fill="#a6e3a1" font-weight="700"> 200 OK</tspan>
+  </text>
+  <text x="20" y="603" font-size="13" fill="#94e2d5">{"id":"pm_e91b","amount":49.00,"currency":"EUR","status":"completed"}</text>
+
+  <!-- Callout: different key = new execution -->
+  <rect x="20" y="618" width="380" height="24" rx="4" fill="#89b4fa" fill-opacity="0.12"/>
+  <text x="28" y="634" font-size="12" fill="#89b4fa" font-weight="700">^ Different key — new payment processed normally.</text>
+
+  <!-- Cursor blink -->
+  <rect x="20" y="656" width="9" height="16" rx="1" fill="#cdd6f4" opacity="0.7">
+    <animate attributeName="opacity" values="0.7;0;0.7" dur="1.2s" repeatCount="indefinite"/>
+  </rect>
+</svg>

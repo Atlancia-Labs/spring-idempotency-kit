@@ -4,6 +4,10 @@ A lightweight, production-ready idempotency solution for Spring Boot 3.x applica
 
 Prevents duplicate operations in distributed systems — double payments, repeated API calls, message retries, webhook duplication — by ensuring methods execute **exactly once** for a given key.
 
+<p align="center">
+  <img src="docs/images/demo.svg" alt="Demo — idempotent API calls" width="780"/>
+</p>
+
 ## Features
 
 - **Annotation-driven** — add `@Idempotent` to any Spring-managed method
@@ -148,26 +152,9 @@ public interface IdempotencyStorage {
 
 ## Architecture
 
-```
-@Idempotent annotation
-        │
-        ▼
- IdempotencyAspect (@Around AOP)
-   ├── Key resolution (SpEL / HTTP header)
-   ├── Cache lookup
-   ├── Distributed lock (SET NX)
-   ├── Method execution
-   └── Result storage
-        │
-        ▼
- IdempotencyStorage (interface)
-        │
-        ▼
- RedisIdempotencyStorage (default impl)
-        │
-        ▼
- IdempotencyAutoConfiguration (wires everything)
-```
+<p align="center">
+  <img src="docs/images/architecture.svg" alt="Architecture diagram" width="780"/>
+</p>
 
 ## License
 

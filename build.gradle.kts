@@ -50,6 +50,11 @@ tasks.named<Jar>("jar") {
     enabled = true
 }
 
+tasks.withType<GenerateModuleMetadata> {
+    suppressedValidationErrors.add("enforced-platform")
+    suppressedValidationErrors.add("dependencies-without-versions")
+}
+
 mavenPublishing {
     publishToMavenCentral(SonatypeHost.CENTRAL_PORTAL)
     signAllPublications()

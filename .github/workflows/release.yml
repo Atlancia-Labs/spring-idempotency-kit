@@ -33,15 +33,15 @@ jobs:
       - name: Build and test
         run: ./gradlew clean build -Pversion=${{ steps.version.outputs.VERSION }}
 
-      - name: Publish to Maven Central (OSSRH)
-        run: ./gradlew publishMavenJavaPublicationToOSSRHRepository -Pversion=${{ steps.version.outputs.VERSION }}
+      - name: Publish to Maven Central
+        run: ./gradlew publishAndReleaseToMavenCentral -Pversion=${{ steps.version.outputs.VERSION }}
         env:
-          OSSRH_USERNAME: ${{ secrets.OSSRH_USERNAME }}
-          OSSRH_PASSWORD: ${{ secrets.OSSRH_PASSWORD }}
-          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_PRIVATE_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
 
       - name: Publish to GitHub Packages
-        run: ./gradlew publishMavenJavaPublicationToGitHubPackagesRepository -Pversion=${{ steps.version.outputs.VERSION }}
+        run: ./gradlew publishAllPublicationsToGitHubPackagesRepository -Pversion=${{ steps.version.outputs.VERSION }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

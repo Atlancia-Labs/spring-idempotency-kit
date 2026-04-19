@@ -17,4 +17,9 @@ public class IdempotencyExceptionHandler {
     public ProblemDetail handleConflictException(IdempotencyConflictException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
     }
+
+    @ExceptionHandler(IdempotencyStorageException.class)
+    public ProblemDetail handleStorageException(IdempotencyStorageException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
+    }
 }

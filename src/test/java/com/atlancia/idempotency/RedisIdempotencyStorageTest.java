@@ -70,24 +70,32 @@ class RedisIdempotencyStorageTest {
     }
 
     @Test
-    void acquireLock_succeedsOnFirstCall() {
-        boolean acquired = storage.acquireLock("lock-key", Duration.ofSeconds(10));
-        assertThat(acquired).isTrue();
+    void acquireLock_returnsTokenOnSuccess() {
+        String token = storage.acquireLock("lock-key", Duration.ofSeconds(10));
+        assertThat(token).isNotNull().isNotEmpty();
     }
 
     @Test
-    void acquireLock_failsOnSecondCall() {
+    void acquireLock_returnsNullOnSecondCall() {
         storage.acquireLock("lock-key", Duration.ofSeconds(10));
-        boolean second = storage.acquireLock("lock-key", Duration.ofSeconds(10));
-        assertThat(second).isFalse();
+        String second = storage.acquireLock("lock-key", Duration.ofSeconds(10));
+        assertThat(second).isNull();
     }
 
     @Test
-    void releaseLock_allowsReacquire() {
+    void releaseLock_withCorrectToken_allowsReacquire() {
+        String token = storage.acquireLock("lock-key", Duration.ofSeconds(10));
+        storage.releaseLock("lock-key", token);
+        String reacquired = storage.acquireLock("lock-key", Duration.ofSeconds(10));
+        assertThat(reacquired).isNotNull();
+    }
+
+    @Test
+    void releaseLock_withWrongToken_doesNotRelease() {
         storage.acquireLock("lock-key", Duration.ofSeconds(10));
-        storage.releaseLock("lock-key");
-        boolean reacquired = storage.acquireLock("lock-key", Duration.ofSeconds(10));
-        assertThat(reacquired).isTrue();
+        storage.releaseLock("lock-key", "wrong-token");
+        String second = storage.acquireLock("lock-key", Duration.ofSeconds(10));
+        assertThat(second).isNull();
     }
 
     @Test
@@ -98,5 +106,27 @@ class RedisIdempotencyStorageTest {
         assertThat(storage.get("ttl-key")).isPresent();
         Thread.sleep(1500);
         assertThat(storage.get("ttl-key")).isEmpty();
+    }
+
+    @Test
+    void lockTtlExpiry_secondAcquirer_notReleasedByFirstHolder() throws InterruptedException {
+        // Simulates: Request A acquires lock, lock expires, Request B acquires,
+        // Request A tries to release — should NOT release B's lock
+        String tokenA = storage.acquireLock("race-key", Duration.ofSeconds(1));
+        assertThat(tokenA).isNotNull();
+
+        // Wait for A's lock to expire
+        Thread.sleep(1500);
+
+        // B acquires the now-free lock
+        String tokenB = storage.acquireLock("race-key", Duration.ofSeconds(10));
+        assertThat(tokenB).isNotNull();
+
+        // A tries to release with its old token — should be a no-op
+        storage.releaseLock("race-key", tokenA);
+
+        // B's lock should still be held
+        String tokenC = storage.acquireLock("race-key", Duration.ofSeconds(10));
+        assertThat(tokenC).isNull(); // lock still held by B
     }
 }

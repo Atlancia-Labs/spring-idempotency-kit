@@ -14,7 +14,9 @@ public class IdempotencyProperties {
     private String keyPrefix = "idempotency:";
     private Duration lockTimeout = Duration.ofSeconds(30);
     private Duration waitTimeout = Duration.ofSeconds(10);
-    private Duration waitPollInterval = Duration.ofMillis(200);
+    private Duration waitPollInitialInterval = Duration.ofMillis(100);
+    private Duration waitPollMaxInterval = Duration.ofSeconds(1);
+    private FailureStrategy defaultOnFailure = FailureStrategy.FAIL_OPEN;
 
     public long getDefaultTtl() {
         return defaultTtl;
@@ -64,12 +66,30 @@ public class IdempotencyProperties {
         this.waitTimeout = waitTimeout;
     }
 
-    public Duration getWaitPollInterval() {
-        return waitPollInterval;
+    public Duration getWaitPollInitialInterval() {
+        return waitPollInitialInterval;
     }
 
+    public void setWaitPollInitialInterval(Duration waitPollInitialInterval) {
+        this.waitPollInitialInterval = waitPollInitialInterval;
+    }
+
+    public Duration getWaitPollMaxInterval() {
+        return waitPollMaxInterval;
+    }
+
+    public void setWaitPollMaxInterval(Duration waitPollMaxInterval) {
+        this.waitPollMaxInterval = waitPollMaxInterval;
+    }
+
+    /**
+     * @deprecated Use {@link #setWaitPollInitialInterval(Duration)} and
+     * {@link #setWaitPollMaxInterval(Duration)} instead.
+     */
+    @Deprecated(since = "0.2.0", forRemoval = true)
     public void setWaitPollInterval(Duration waitPollInterval) {
-        this.waitPollInterval = waitPollInterval;
+        this.waitPollInitialInterval = waitPollInterval;
+        this.waitPollMaxInterval = waitPollInterval;
     }
 
     public Duration getResolvedTtl(long annotationTtl, TimeUnit annotationTimeUnit) {
@@ -84,5 +104,20 @@ public class IdempotencyProperties {
             return annotationStrategy;
         }
         return defaultOnConcurrent;
+    }
+
+    public FailureStrategy getDefaultOnFailure() {
+        return defaultOnFailure;
+    }
+
+    public void setDefaultOnFailure(FailureStrategy defaultOnFailure) {
+        this.defaultOnFailure = defaultOnFailure;
+    }
+
+    public FailureStrategy getResolvedFailureStrategy(FailureStrategy annotationStrategy) {
+        if (annotationStrategy != FailureStrategy.DEFAULT) {
+            return annotationStrategy;
+        }
+        return defaultOnFailure;
     }
 }

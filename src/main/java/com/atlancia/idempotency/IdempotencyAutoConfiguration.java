@@ -8,8 +8,9 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.lang.Nullable;
 
-@AutoConfiguration
+@AutoConfiguration(after = IdempotencyMetricsAutoConfiguration.class)
 @ConditionalOnClass(RedisTemplate.class)
 @EnableConfigurationProperties(IdempotencyProperties.class)
 public class IdempotencyAutoConfiguration {
@@ -26,8 +27,9 @@ public class IdempotencyAutoConfiguration {
     @ConditionalOnMissingBean
     public IdempotencyAspect idempotencyAspect(IdempotencyStorage storage,
                                                 IdempotencyProperties properties,
-                                                ObjectMapper objectMapper) {
-        return new IdempotencyAspect(storage, properties, objectMapper);
+                                                ObjectMapper objectMapper,
+                                                @Nullable IdempotencyMetrics metrics) {
+        return new IdempotencyAspect(storage, properties, objectMapper, metrics);
     }
 
     @Bean

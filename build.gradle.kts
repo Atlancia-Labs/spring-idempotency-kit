@@ -26,6 +26,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-data-redis")
 
     compileOnly("org.springframework.boot:spring-boot-starter-web")
+    compileOnly("io.micrometer:micrometer-core")
 
     annotationProcessor("org.springframework.boot:spring-boot-configuration-processor")
 
@@ -33,6 +34,7 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-starter-web")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testImplementation("org.testcontainers:junit-jupiter")
+    testImplementation("io.micrometer:micrometer-core")
 
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

@@ -1,1 +1,2 @@
 com.atlancia.idempotency.IdempotencyAutoConfiguration
+com.atlancia.idempotency.IdempotencyMetricsAutoConfiguration

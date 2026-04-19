@@ -1,5 +1,7 @@
 package com.atlancia.idempotency;
 
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
@@ -43,6 +45,11 @@ class IdempotencyIntegrationTest {
         public TestController testController() {
             return new TestController();
         }
+
+        @Bean
+        public MeterRegistry meterRegistry() {
+            return new SimpleMeterRegistry();
+        }
     }
 
     @RestController
@@ -76,6 +83,24 @@ class IdempotencyIntegrationTest {
             throw new RuntimeException("business error");
         }
 
+        @PostMapping("/test/fail-closed")
+        @Idempotent(key = "#id", onFailure = FailureStrategy.FAIL_CLOSED)
+        public Map<String, Object> failClosedEndpoint(@RequestHeader("X-Request-Id") String id) {
+            return Map.of("count", callCount.incrementAndGet(), "id", id);
+        }
+
+        @PostMapping("/test/storage-error")
+        public Map<String, Object> storageErrorEndpoint() {
+            throw new IdempotencyStorageException("Redis unavailable", new RuntimeException("connection refused"));
+        }
+
+        @PostMapping("/test/wait")
+        @Idempotent(key = "#id", onConcurrent = ConcurrentStrategy.WAIT)
+        public Map<String, Object> waitEndpoint(@RequestHeader("X-Request-Id") String id) throws InterruptedException {
+            Thread.sleep(300);
+            return Map.of("count", callCount.incrementAndGet());
+        }
+
         public int getCallCount() {
             return callCount.get();
         }
@@ -100,6 +125,9 @@ class IdempotencyIntegrationTest {
 
     @Autowired
     private TestController testController;
+
+    @Autowired
+    private MeterRegistry meterRegistry;
 
     @Test
     void spelKey_firstCallExecutes_secondReturnsCached() throws Exception {
@@ -187,6 +215,23 @@ class IdempotencyIntegrationTest {
     }
 
     @Test
+    void failClosed_withWorkingRedis_behavesNormally() throws Exception {
+        testController.resetCount();
+
+        mockMvc.perform(post("/test/fail-closed")
+                        .header("X-Request-Id", "fc-1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.count").value(1));
+
+        mockMvc.perform(post("/test/fail-closed")
+                        .header("X-Request-Id", "fc-1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.count").value(1));
+
+        assertThat(testController.getCallCount()).isEqualTo(1);
+    }
+
+    @Test
     void errorDoesNotCache_allowsRetry() {
         testController.resetCount();
 
@@ -199,5 +244,55 @@ class IdempotencyIntegrationTest {
                 .hasCauseInstanceOf(RuntimeException.class);
 
         assertThat(testController.getCallCount()).isEqualTo(2);
+    }
+
+    @Test
+    void metrics_recordCacheHitAndMiss() throws Exception {
+        testController.resetCount();
+
+        mockMvc.perform(post("/test/spel")
+                        .header("X-Request-Id", "metrics-1"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/test/spel")
+                        .header("X-Request-Id", "metrics-1"))
+                .andExpect(status().isOk());
+
+        assertThat(meterRegistry.counter("idempotency.cache.miss", "key_prefix", "idempotency:").count())
+                .isGreaterThanOrEqualTo(1.0);
+        assertThat(meterRegistry.counter("idempotency.cache.hit", "key_prefix", "idempotency:").count())
+                .isGreaterThanOrEqualTo(1.0);
+    }
+
+    @Test
+    void storageException_returns503() throws Exception {
+        mockMvc.perform(post("/test/storage-error"))
+                .andExpect(status().isServiceUnavailable());
+    }
+
+    @Test
+    void concurrentWait_secondRequestWaitsAndGetsCachedResult() throws Exception {
+        testController.resetCount();
+
+        var thread = new Thread(() -> {
+            try {
+                mockMvc.perform(post("/test/wait")
+                                .header("X-Request-Id", "wait-1"))
+                        .andExpect(status().isOk())
+                        .andExpect(jsonPath("$.count").value(1));
+            } catch (Exception ignored) {
+            }
+        });
+        thread.start();
+
+        Thread.sleep(100); // let first request acquire lock
+
+        mockMvc.perform(post("/test/wait")
+                        .header("X-Request-Id", "wait-1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.count").value(1)); // same cached result
+
+        thread.join();
+        assertThat(testController.getCallCount()).isEqualTo(1);
     }
 }

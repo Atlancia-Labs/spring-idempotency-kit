@@ -3,11 +3,28 @@ package com.atlancia.idempotency;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 public class RedisIdempotencyStorage implements IdempotencyStorage {
+
+    private static final DefaultRedisScript<Long> RELEASE_LOCK_SCRIPT;
+
+    static {
+        RELEASE_LOCK_SCRIPT = new DefaultRedisScript<>();
+        RELEASE_LOCK_SCRIPT.setScriptText(
+                "if redis.call('get', KEYS[1]) == ARGV[1] then " +
+                "  return redis.call('del', KEYS[1]) " +
+                "else " +
+                "  return 0 " +
+                "end"
+        );
+        RELEASE_LOCK_SCRIPT.setResultType(Long.class);
+    }
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
@@ -35,10 +52,11 @@ public class RedisIdempotencyStorage implements IdempotencyStorage {
     }
 
     @Override
-    public boolean acquireLock(String key, Duration lockTtl) {
+    public String acquireLock(String key, Duration lockTtl) {
+        String token = UUID.randomUUID().toString();
         Boolean result = redisTemplate.opsForValue()
-                .setIfAbsent(lockKey(key), "locked", lockTtl);
-        return Boolean.TRUE.equals(result);
+                .setIfAbsent(lockKey(key), token, lockTtl);
+        return Boolean.TRUE.equals(result) ? token : null;
     }
 
     @Override
@@ -52,8 +70,8 @@ public class RedisIdempotencyStorage implements IdempotencyStorage {
     }
 
     @Override
-    public void releaseLock(String key) {
-        redisTemplate.delete(lockKey(key));
+    public void releaseLock(String key, String lockToken) {
+        redisTemplate.execute(RELEASE_LOCK_SCRIPT, List.of(lockKey(key)), lockToken);
     }
 
     private String resultKey(String key) {

@@ -14,4 +14,5 @@ public @interface Idempotent {
     long ttl() default -1;
     TimeUnit timeUnit() default TimeUnit.HOURS;
     ConcurrentStrategy onConcurrent() default ConcurrentStrategy.DEFAULT;
+    FailureStrategy onFailure() default FailureStrategy.DEFAULT;
 }

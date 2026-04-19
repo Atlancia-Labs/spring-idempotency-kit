@@ -32,7 +32,7 @@ Prevents duplicate operations in distributed systems — double payments, repeat
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("com.atlancia:spring-idempotency-kit:0.1.0-SNAPSHOT")
+    implementation("com.atlancia:spring-idempotency-kit:0.1.0")
 }
 ```
 
@@ -157,5 +157,4 @@ public interface IdempotencyStorage {
 </p>
 
 ## License
-
-TBD
+Apache-2.0

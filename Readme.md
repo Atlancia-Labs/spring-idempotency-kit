@@ -13,10 +13,11 @@ Prevents duplicate operations in distributed systems — double payments, repeat
 - **Annotation-driven** — add `@Idempotent` to any Spring-managed method
 - **Dual key resolution** — SpEL expressions or HTTP headers
 - **Redis-backed** with distributed locking via `SET NX`
-- **Concurrent request handling** — configurable REJECT (409) or WAIT strategy
-- **Fail-open design** — Redis outages don't break your application
+- **Concurrent request handling** — configurable REJECT (409) or WAIT (with exponential backoff) strategy
+- **Failure strategies** — FAIL_OPEN (default) continues without idempotency on Redis outage, FAIL_CLOSED rejects requests
 - **Response caching** — repeated calls return the cached result without re-execution
 - **Configurable TTL** — per-method or global defaults
+- **Micrometer metrics** — cache hits/misses, lock acquisition, execution timing, fail-open events
 - **Auto-configuration** — zero boilerplate setup with Spring Boot
 
 ## Requirements
@@ -32,7 +33,7 @@ Prevents duplicate operations in distributed systems — double payments, repeat
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("com.atlancia:spring-idempotency-kit:0.1.0")
+    implementation("io.github.atlancia-labs:spring-idempotency-kit:0.1.0")
 }
 ```
 
@@ -82,7 +83,7 @@ When a second request arrives while the first is still executing:
 | Strategy | Behavior |
 |----------|----------|
 | `REJECT` (default) | Immediately throws `IdempotencyConflictException` → **409 Conflict** |
-| `WAIT` | Polls Redis until the first request completes, then returns the cached result. Throws 409 on timeout. |
+| `WAIT` | Polls Redis with exponential backoff (100ms → 1s) until the first request completes, then returns the cached result. Throws 409 on timeout. |
 
 ```java
 @Idempotent(headerName = "Idempotency-Key", onConcurrent = ConcurrentStrategy.WAIT)
@@ -98,13 +99,15 @@ All properties are optional with sensible defaults:
 ```yaml
 spring:
   idempotency:
-    default-ttl: 24              # TTL value (default: 24)
-    default-time-unit: hours     # TTL unit (default: hours)
-    default-on-concurrent: reject # REJECT or WAIT (default: reject)
-    key-prefix: "idempotency:"   # Redis key prefix (default: "idempotency:")
-    lock-timeout: 30s            # Distributed lock TTL (default: 30s)
-    wait-timeout: 10s            # Max wait time for WAIT strategy (default: 10s)
-    wait-poll-interval: 200ms    # Poll interval for WAIT strategy (default: 200ms)
+    default-ttl: 24                        # TTL value (default: 24)
+    default-time-unit: hours               # TTL unit (default: hours)
+    default-on-concurrent: reject          # REJECT or WAIT (default: reject)
+    default-on-failure: fail-open          # FAIL_OPEN or FAIL_CLOSED (default: fail-open)
+    key-prefix: "idempotency:"             # Redis key prefix (default: "idempotency:")
+    lock-timeout: 30s                      # Distributed lock TTL (default: 30s)
+    wait-timeout: 10s                      # Max wait time for WAIT strategy (default: 10s)
+    wait-poll-initial-interval: 100ms      # Initial poll interval (default: 100ms)
+    wait-poll-max-interval: 1s             # Max poll interval after backoff (default: 1s)
 ```
 
 Per-method overrides via annotation:
@@ -112,6 +115,9 @@ Per-method overrides via annotation:
 ```java
 @Idempotent(key = "#id", ttl = 1, timeUnit = TimeUnit.MINUTES)
 public Response shortLivedOperation(String id) { ... }
+
+@Idempotent(key = "#id", onFailure = FailureStrategy.FAIL_CLOSED)
+public Response criticalPayment(String id) { ... }
 ```
 
 ## Error Handling
@@ -124,7 +130,8 @@ public Response shortLivedOperation(String id) { ... }
 | Concurrent duplicate (REJECT) | `IdempotencyConflictException` → **409 Conflict** |
 | Concurrent duplicate (WAIT, timeout) | `IdempotencyConflictException` → **409 Conflict** |
 | Method throws exception | Lock released, result **not cached**, exception propagates |
-| Redis unavailable | Fail open — method executes normally, warning logged |
+| Redis unavailable (FAIL_OPEN) | Method executes normally without idempotency, warning logged |
+| Redis unavailable (FAIL_CLOSED) | `IdempotencyStorageException` → **503 Service Unavailable** |
 
 Error responses use RFC 7807 Problem Detail format via `@RestControllerAdvice`.
 
@@ -144,11 +151,25 @@ public IdempotencyStorage customStorage() {
 ```java
 public interface IdempotencyStorage {
     Optional<IdempotencyResult> get(String key);
-    boolean acquireLock(String key, Duration lockTtl);
+    String acquireLock(String key, Duration lockTtl);  // returns lock token, or null if already held
     void store(String key, IdempotencyResult result, Duration ttl);
-    void releaseLock(String key);
+    void releaseLock(String key, String lockToken);     // token-aware release
 }
 ```
+
+## Metrics
+
+When Micrometer is on the classpath, the following metrics are recorded automatically:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `idempotency.cache.hit` | Counter | Cached result returned |
+| `idempotency.cache.miss` | Counter | No cached result, method executed |
+| `idempotency.lock.acquired` | Counter | Distributed lock acquired |
+| `idempotency.lock.rejected` | Counter | Lock already held by another request |
+| `idempotency.execution` | Timer | Method execution duration |
+| `idempotency.failopen` | Counter | Fail-open fallback triggered (tagged by `phase`) |
+| `idempotency.conflict` | Counter | Conflict response returned (tagged by `strategy`) |
 
 ## Architecture
 

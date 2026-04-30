@@ -2,6 +2,7 @@ import com.vanniktech.maven.publish.SonatypeHost
 
 plugins {
     java
+    signing
     id("com.vanniktech.maven.publish") version "0.30.0"
     id("org.springframework.boot") version "3.4.4"
     id("io.spring.dependency-management") version "1.1.7"
@@ -53,6 +54,13 @@ tasks.named<Jar>("jar") {
 tasks.withType<GenerateModuleMetadata> {
     suppressedValidationErrors.add("enforced-platform")
     suppressedValidationErrors.add("dependencies-without-versions")
+}
+
+signing {
+    val signingKeyId = findProperty("signingInMemoryKeyId") as String?
+    val signingKey = findProperty("signingInMemoryKey") as String?
+    val signingPassword = findProperty("signingInMemoryKeyPassword") as String?
+    useInMemoryPgpKeys(signingKeyId, signingKey, signingPassword)
 }
 
 mavenPublishing {

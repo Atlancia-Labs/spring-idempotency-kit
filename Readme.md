@@ -179,3 +179,7 @@ When Micrometer is on the classpath, the following metrics are recorded automati
 
 ## License
 Apache-2.0
+
+---
+
+Built by [Atlancia Labs](https://www.linkedin.com/company/atlancia-labs) — Senior Backend & DevOps consulting, remote.

@@ -5,7 +5,7 @@ A lightweight, production-ready idempotency solution for Spring Boot 3.x applica
 Prevents duplicate operations in distributed systems — double payments, repeated API calls, message retries, webhook duplication — by ensuring methods execute **exactly once** for a given key.
 
 <p align="center">
-  <img src="docs/images/demo.svg" alt="Demo — idempotent API calls" width="780"/>
+  <img src="docs/images/demo.svg" alt="Demo of idempotent API calls" width="780"/>
 </p>
 
 ## Features
@@ -139,7 +139,7 @@ Error responses use RFC 7807 Problem Detail format via `@RestControllerAdvice`.
 
 ### Custom storage backend
 
-Implement `IdempotencyStorage` and register it as a bean — the auto-configuration will back off:
+Redis is the provided implementation, but the library is fully storage-agnostic. Any backend that supports atomic compare-and-set and TTL-based expiry (e.g. PostgreSQL with advisory locks, DynamoDB with conditional writes, Hazelcast) can be used by implementing `IdempotencyStorage` and registering it as a Spring bean — the auto-configuration backs off automatically:
 
 ```java
 @Bean
@@ -156,6 +156,15 @@ public interface IdempotencyStorage {
     void releaseLock(String key, String lockToken);     // token-aware release
 }
 ```
+
+**Contract requirements for implementors:**
+
+| Method | Requirement |
+|--------|-------------|
+| `acquireLock` | Must be atomic (compare-and-set). Return a unique token on success, `null` if the lock is already held. The lock **must expire** after `lockTtl` to handle node crashes — if the holder dies without calling `releaseLock`, the lock must free itself automatically. |
+| `releaseLock` | Must be token-aware: only release the lock if the stored token matches the one provided. This prevents a late-arriving crashed node from releasing a lock now held by a different request. |
+| `store` | Must persist the result with the given TTL. Entries should expire automatically so stale keys don't accumulate. |
+| `get` | Must return `Optional.empty()` when no result is stored for the key (including after TTL expiry). |
 
 ## Metrics
 

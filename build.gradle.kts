@@ -60,7 +60,10 @@ signing {
     val signingKeyId = findProperty("signingInMemoryKeyId") as String?
     val signingKey = findProperty("signingInMemoryKey") as String?
     val signingPassword = findProperty("signingInMemoryKeyPassword") as String?
-    useInMemoryPgpKeys(signingKeyId, signingKey, signingPassword)
+    if (signingKey != null) {
+        useInMemoryPgpKeys(signingKeyId, signingKey, signingPassword)
+    }
+    isRequired = signingKey != null
 }
 
 mavenPublishing {

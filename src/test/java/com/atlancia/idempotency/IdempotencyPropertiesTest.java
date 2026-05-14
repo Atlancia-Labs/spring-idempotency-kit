@@ -11,6 +11,7 @@ class IdempotencyPropertiesTest {
 
     private final IdempotencyProperties properties = new IdempotencyProperties();
 
+    @SuppressWarnings("removal")
     @Test
     void deprecatedSetWaitPollInterval_setsBothNewProperties() {
         properties.setWaitPollInterval(Duration.ofMillis(300));

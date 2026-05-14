@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 
+import org.springframework.data.redis.core.ScanOptions;
+
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
@@ -72,6 +74,22 @@ public class RedisIdempotencyStorage implements IdempotencyStorage {
     @Override
     public void releaseLock(String key, String lockToken) {
         redisTemplate.execute(RELEASE_LOCK_SCRIPT, List.of(lockKey(key)), lockToken);
+    }
+
+    @Override
+    public long keyCount() {
+        long count = 0;
+        ScanOptions options = ScanOptions.scanOptions()
+                .match(keyPrefix + "*:result")
+                .count(1000)
+                .build();
+        try (var cursor = redisTemplate.scan(options)) {
+            while (cursor.hasNext()) {
+                cursor.next();
+                count++;
+            }
+        }
+        return count;
     }
 
     private String resultKey(String key) {

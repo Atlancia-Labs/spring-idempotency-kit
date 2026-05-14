@@ -5,6 +5,9 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
+import java.util.Optional;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class IdempotencyMetricsTest {
@@ -66,5 +69,61 @@ class IdempotencyMetricsTest {
         assertThat(result).isEqualTo("done");
         assertThat(registry.timer("idempotency.execution", "key_prefix", "idempotency:").count())
                 .isEqualTo(1);
+    }
+
+    @Test
+    void recordExecutionError_incrementsCounterWithException() {
+        metrics.recordExecutionError("NullPointerException");
+        assertThat(registry.counter("idempotency.execution.error",
+                "key_prefix", "idempotency:", "exception", "NullPointerException").count())
+                .isEqualTo(1.0);
+    }
+
+    @Test
+    void recordLockReleaseFailure_incrementsCounter() {
+        metrics.recordLockReleaseFailure();
+        assertThat(registry.counter("idempotency.lock.release.failure", "key_prefix", "idempotency:").count())
+                .isEqualTo(1.0);
+    }
+
+    @Test
+    void recordStorageError_incrementsCounterWithPhase() {
+        metrics.recordStorageError("cache");
+        metrics.recordStorageError("lock");
+        metrics.recordStorageError("store");
+        assertThat(registry.counter("idempotency.storage.error",
+                "key_prefix", "idempotency:", "phase", "cache").count()).isEqualTo(1.0);
+        assertThat(registry.counter("idempotency.storage.error",
+                "key_prefix", "idempotency:", "phase", "lock").count()).isEqualTo(1.0);
+        assertThat(registry.counter("idempotency.storage.error",
+                "key_prefix", "idempotency:", "phase", "store").count()).isEqualTo(1.0);
+    }
+
+    @Test
+    void recordSerializationError_incrementsCounter() {
+        metrics.recordSerializationError();
+        assertThat(registry.counter("idempotency.serialization.error", "key_prefix", "idempotency:").count())
+                .isEqualTo(1.0);
+    }
+
+    @Test
+    void waitDurationTimer_recordsDuration() {
+        Object sample = metrics.startWaitTimer();
+        metrics.stopWaitTimer(sample);
+        assertThat(registry.timer("idempotency.wait.duration", "key_prefix", "idempotency:").count())
+                .isEqualTo(1);
+    }
+
+    @Test
+    void registerKeyCountGauge_registersGauge() {
+        IdempotencyStorage storage = new IdempotencyStorage() {
+            @Override public Optional<IdempotencyResult> get(String key) { return Optional.empty(); }
+            @Override public String acquireLock(String key, Duration lockTtl) { return null; }
+            @Override public void store(String key, IdempotencyResult result, Duration ttl) {}
+            @Override public void releaseLock(String key, String lockToken) {}
+            @Override public long keyCount() { return 42; }
+        };
+        metrics.registerKeyCountGauge(storage);
+        assertThat(registry.get("idempotency.keys.count").gauge().value()).isEqualTo(42.0);
     }
 }

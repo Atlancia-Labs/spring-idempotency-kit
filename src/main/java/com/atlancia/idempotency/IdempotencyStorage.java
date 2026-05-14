@@ -8,4 +8,8 @@ public interface IdempotencyStorage {
     String acquireLock(String key, Duration lockTtl);
     void store(String key, IdempotencyResult result, Duration ttl);
     void releaseLock(String key, String lockToken);
+
+    default long keyCount() {
+        return -1;
+    }
 }

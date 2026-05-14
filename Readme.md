@@ -17,7 +17,7 @@ Prevents duplicate operations in distributed systems — double payments, repeat
 - **Failure strategies** — FAIL_OPEN (default) continues without idempotency on Redis outage, FAIL_CLOSED rejects requests
 - **Response caching** — repeated calls return the cached result without re-execution
 - **Configurable TTL** — per-method or global defaults
-- **Micrometer metrics** — cache hits/misses, lock acquisition, execution timing, fail-open events
+- **Micrometer metrics** — 13 metrics covering cache hits/misses, lock lifecycle, execution timing, storage errors, serialization failures, wait duration, and key count
 - **Auto-configuration** — zero boilerplate setup with Spring Boot
 
 ## Requirements
@@ -154,6 +154,7 @@ public interface IdempotencyStorage {
     String acquireLock(String key, Duration lockTtl);  // returns lock token, or null if already held
     void store(String key, IdempotencyResult result, Duration ttl);
     void releaseLock(String key, String lockToken);     // token-aware release
+    default long keyCount() { return -1; }             // override to enable idempotency.keys.count gauge
 }
 ```
 
@@ -170,15 +171,21 @@ public interface IdempotencyStorage {
 
 When Micrometer is on the classpath, the following metrics are recorded automatically:
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `idempotency.cache.hit` | Counter | Cached result returned |
-| `idempotency.cache.miss` | Counter | No cached result, method executed |
-| `idempotency.lock.acquired` | Counter | Distributed lock acquired |
-| `idempotency.lock.rejected` | Counter | Lock already held by another request |
-| `idempotency.execution` | Timer | Method execution duration |
-| `idempotency.failopen` | Counter | Fail-open fallback triggered (tagged by `phase`) |
-| `idempotency.conflict` | Counter | Conflict response returned (tagged by `strategy`) |
+| Metric | Type | Tags | Description |
+|--------|------|------|-------------|
+| `idempotency.cache.hit` | Counter | `key_prefix` | Cached result returned |
+| `idempotency.cache.miss` | Counter | `key_prefix` | No cached result, method executed |
+| `idempotency.lock.acquired` | Counter | `key_prefix` | Distributed lock acquired |
+| `idempotency.lock.rejected` | Counter | `key_prefix` | Lock already held by another request |
+| `idempotency.lock.release.failure` | Counter | `key_prefix` | Lock release failed after execution (e.g. Redis connectivity blip) |
+| `idempotency.execution` | Timer | `key_prefix` | Method execution duration |
+| `idempotency.execution.error` | Counter | `key_prefix`, `exception` | Method threw an exception (tagged by exception class name) |
+| `idempotency.failopen` | Counter | `key_prefix`, `phase` | Fail-open fallback triggered (`phase`: `cache` or `lock`) |
+| `idempotency.conflict` | Counter | `key_prefix`, `strategy` | Conflict response returned (`strategy`: `reject`, `wait_timeout`, or `wait_interrupted`) |
+| `idempotency.storage.error` | Counter | `key_prefix`, `phase` | Storage layer failure (`phase`: `cache`, `lock`, or `store`) — fires regardless of fail-open/fail-closed |
+| `idempotency.wait.duration` | Timer | `key_prefix` | Time spent polling in WAIT concurrent strategy |
+| `idempotency.serialization.error` | Counter | `key_prefix` | Failed to serialize or deserialize a cached result |
+| `idempotency.keys.count` | Gauge | `key_prefix` | Number of idempotency keys currently stored (Redis uses SCAN; custom implementations can override `keyCount()`) |
 
 ## Architecture
 

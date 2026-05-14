@@ -1,6 +1,7 @@
 package com.atlancia.idempotency;
 
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 
@@ -12,7 +13,10 @@ public class IdempotencyMetrics {
     private final Counter cacheMissCounter;
     private final Counter lockAcquiredCounter;
     private final Counter lockRejectedCounter;
+    private final Counter lockReleaseFailureCounter;
+    private final Counter serializationErrorCounter;
     private final Timer executionTimer;
+    private final Timer waitDurationTimer;
     private final MeterRegistry registry;
     private final String keyPrefix;
 
@@ -31,7 +35,16 @@ public class IdempotencyMetrics {
         this.lockRejectedCounter = Counter.builder("idempotency.lock.rejected")
                 .tag("key_prefix", keyPrefix)
                 .register(registry);
+        this.lockReleaseFailureCounter = Counter.builder("idempotency.lock.release.failure")
+                .tag("key_prefix", keyPrefix)
+                .register(registry);
+        this.serializationErrorCounter = Counter.builder("idempotency.serialization.error")
+                .tag("key_prefix", keyPrefix)
+                .register(registry);
         this.executionTimer = Timer.builder("idempotency.execution")
+                .tag("key_prefix", keyPrefix)
+                .register(registry);
+        this.waitDurationTimer = Timer.builder("idempotency.wait.duration")
                 .tag("key_prefix", keyPrefix)
                 .register(registry);
     }
@@ -52,6 +65,30 @@ public class IdempotencyMetrics {
         lockRejectedCounter.increment();
     }
 
+    public void recordLockReleaseFailure() {
+        lockReleaseFailureCounter.increment();
+    }
+
+    public void recordSerializationError() {
+        serializationErrorCounter.increment();
+    }
+
+    public void recordExecutionError(String exceptionClass) {
+        Counter.builder("idempotency.execution.error")
+                .tag("key_prefix", keyPrefix)
+                .tag("exception", exceptionClass)
+                .register(registry)
+                .increment();
+    }
+
+    public void recordStorageError(String phase) {
+        Counter.builder("idempotency.storage.error")
+                .tag("key_prefix", keyPrefix)
+                .tag("phase", phase)
+                .register(registry)
+                .increment();
+    }
+
     public void recordFailOpen(String phase) {
         Counter.builder("idempotency.failopen")
                 .tag("key_prefix", keyPrefix)
@@ -70,5 +107,19 @@ public class IdempotencyMetrics {
 
     public <T> T recordExecution(Callable<T> action) throws Exception {
         return executionTimer.recordCallable(action);
+    }
+
+    public Object startWaitTimer() {
+        return Timer.start(registry);
+    }
+
+    public void stopWaitTimer(Object sample) {
+        ((Timer.Sample) sample).stop(waitDurationTimer);
+    }
+
+    public void registerKeyCountGauge(IdempotencyStorage storage) {
+        Gauge.builder("idempotency.keys.count", storage, IdempotencyStorage::keyCount)
+                .tag("key_prefix", keyPrefix)
+                .register(registry);
     }
 }

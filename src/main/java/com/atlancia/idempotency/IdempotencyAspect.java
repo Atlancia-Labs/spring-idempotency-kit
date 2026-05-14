@@ -62,6 +62,7 @@ public class IdempotencyAspect {
                 return deserialize(cached.get(), method.getReturnType());
             }
         } catch (Exception e) {
+            if (metrics != null) metrics.recordStorageError("cache");
             if (failureStrategy == FailureStrategy.FAIL_CLOSED) {
                 throw new IdempotencyStorageException("Failed to read from idempotency storage", e);
             }
@@ -75,6 +76,7 @@ public class IdempotencyAspect {
         try {
             lockToken = storage.acquireLock(key, properties.getLockTimeout());
         } catch (Exception e) {
+            if (metrics != null) metrics.recordStorageError("lock");
             if (failureStrategy == FailureStrategy.FAIL_CLOSED) {
                 throw new IdempotencyStorageException("Failed to acquire idempotency lock", e);
             }
@@ -97,21 +99,37 @@ public class IdempotencyAspect {
         try {
             Object result;
             if (metrics != null) {
-                result = metrics.recordExecution(() -> {
-                    try {
-                        return joinPoint.proceed();
-                    } catch (Exception e) {
-                        throw e;
-                    } catch (Throwable t) {
-                        throw new RuntimeException(t);
-                    }
-                });
+                try {
+                    result = metrics.recordExecution(() -> {
+                        try {
+                            return joinPoint.proceed();
+                        } catch (Exception e) {
+                            throw e;
+                        } catch (Throwable t) {
+                            throw new RuntimeException(t);
+                        }
+                    });
+                } catch (Exception e) {
+                    metrics.recordExecutionError(e.getClass().getSimpleName());
+                    throw e;
+                }
             } else {
                 result = joinPoint.proceed();
             }
-            String serialized = objectMapper.writeValueAsString(result);
+            String serialized;
+            try {
+                serialized = objectMapper.writeValueAsString(result);
+            } catch (Exception e) {
+                if (metrics != null) metrics.recordSerializationError();
+                throw new RuntimeException("Failed to serialize idempotency result", e);
+            }
             var idempotencyResult = new IdempotencyResult(serialized, method.getReturnType().getName());
-            storage.store(key, idempotencyResult, ttl);
+            try {
+                storage.store(key, idempotencyResult, ttl);
+            } catch (Exception e) {
+                if (metrics != null) metrics.recordStorageError("store");
+                throw e;
+            }
             log.debug("Idempotency result stored for key={}, outcome=executed", key);
             return result;
         } finally {
@@ -119,6 +137,7 @@ public class IdempotencyAspect {
                 storage.releaseLock(key, lockToken);
             } catch (Exception ex) {
                 log.warn("Failed to release idempotency lock for key={}", key, ex);
+                if (metrics != null) metrics.recordLockReleaseFailure();
             }
         }
     }
@@ -175,35 +194,41 @@ public class IdempotencyAspect {
         }
 
         // WAIT strategy: poll with exponential backoff
+        Object waitSample = metrics != null ? metrics.startWaitTimer() : null;
         long deadline = System.currentTimeMillis() + properties.getWaitTimeout().toMillis();
         long currentInterval = properties.getWaitPollInitialInterval().toMillis();
         long maxInterval = properties.getWaitPollMaxInterval().toMillis();
 
-        while (System.currentTimeMillis() < deadline) {
-            Optional<IdempotencyResult> cached = storage.get(key);
-            if (cached.isPresent()) {
-                log.debug("Idempotency wait resolved for key={}, outcome=hit", key);
-                if (metrics != null) metrics.recordCacheHit();
-                return deserialize(cached.get(), returnType);
+        try {
+            while (System.currentTimeMillis() < deadline) {
+                Optional<IdempotencyResult> cached = storage.get(key);
+                if (cached.isPresent()) {
+                    log.debug("Idempotency wait resolved for key={}, outcome=hit", key);
+                    if (metrics != null) metrics.recordCacheHit();
+                    return deserialize(cached.get(), returnType);
+                }
+                try {
+                    Thread.sleep(currentInterval);
+                    currentInterval = Math.min(currentInterval * 2, maxInterval);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    if (metrics != null) metrics.recordConflict("wait_interrupted");
+                    throw new IdempotencyConflictException("Interrupted while waiting for idempotent result: " + key);
+                }
             }
-            try {
-                Thread.sleep(currentInterval);
-                currentInterval = Math.min(currentInterval * 2, maxInterval);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                if (metrics != null) metrics.recordConflict("wait_interrupted");
-                throw new IdempotencyConflictException("Interrupted while waiting for idempotent result: " + key);
-            }
+            log.debug("Idempotency wait timeout for key={}, outcome=conflict, strategy=wait_timeout", key);
+            if (metrics != null) metrics.recordConflict("wait_timeout");
+            throw new IdempotencyConflictException("Timeout waiting for idempotent result for key: " + key);
+        } finally {
+            if (waitSample != null) metrics.stopWaitTimer(waitSample);
         }
-        log.debug("Idempotency wait timeout for key={}, outcome=conflict, strategy=wait_timeout", key);
-        if (metrics != null) metrics.recordConflict("wait_timeout");
-        throw new IdempotencyConflictException("Timeout waiting for idempotent result for key: " + key);
     }
 
     private Object deserialize(IdempotencyResult result, Class<?> returnType) {
         try {
             return objectMapper.readValue(result.body(), returnType);
         } catch (Exception e) {
+            if (metrics != null) metrics.recordSerializationError();
             throw new RuntimeException("Failed to deserialize cached idempotency result", e);
         }
     }

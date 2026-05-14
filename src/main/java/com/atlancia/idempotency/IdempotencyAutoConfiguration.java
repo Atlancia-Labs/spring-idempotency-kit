@@ -29,6 +29,9 @@ public class IdempotencyAutoConfiguration {
                                                 IdempotencyProperties properties,
                                                 ObjectMapper objectMapper,
                                                 @Nullable IdempotencyMetrics metrics) {
+        if (metrics != null) {
+            metrics.registerKeyCountGauge(storage);
+        }
         return new IdempotencyAspect(storage, properties, objectMapper, metrics);
     }
 

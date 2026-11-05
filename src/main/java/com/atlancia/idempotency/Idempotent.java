@@ -15,4 +15,5 @@ public @interface Idempotent {
     TimeUnit timeUnit() default TimeUnit.HOURS;
     ConcurrentStrategy onConcurrent() default ConcurrentStrategy.DEFAULT;
     FailureStrategy onFailure() default FailureStrategy.DEFAULT;
+    RequestMatchStrategy requestMatch() default RequestMatchStrategy.DEFAULT;
 }

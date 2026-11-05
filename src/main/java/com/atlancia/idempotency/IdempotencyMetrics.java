@@ -15,6 +15,7 @@ public class IdempotencyMetrics {
     private final Counter lockRejectedCounter;
     private final Counter lockReleaseFailureCounter;
     private final Counter serializationErrorCounter;
+    private final Counter mismatchCounter;
     private final Timer executionTimer;
     private final Timer waitDurationTimer;
     private final MeterRegistry registry;
@@ -39,6 +40,9 @@ public class IdempotencyMetrics {
                 .tag("key_prefix", keyPrefix)
                 .register(registry);
         this.serializationErrorCounter = Counter.builder("idempotency.serialization.error")
+                .tag("key_prefix", keyPrefix)
+                .register(registry);
+        this.mismatchCounter = Counter.builder("idempotency.mismatch")
                 .tag("key_prefix", keyPrefix)
                 .register(registry);
         this.executionTimer = Timer.builder("idempotency.execution")
@@ -71,6 +75,10 @@ public class IdempotencyMetrics {
 
     public void recordSerializationError() {
         serializationErrorCounter.increment();
+    }
+
+    public void recordMismatch() {
+        mismatchCounter.increment();
     }
 
     public void recordExecutionError(String exceptionClass) {

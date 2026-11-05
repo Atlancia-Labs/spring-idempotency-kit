@@ -7,13 +7,16 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.lang.reflect.Method;
+import java.security.MessageDigest;
 import java.time.Duration;
+import java.util.HexFormat;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
@@ -82,6 +85,17 @@ class IdempotencyAspectTest {
         public String processWithWait(String id) {
             return "result";
         }
+
+        @Idempotent(key = "#id", requestMatch = RequestMatchStrategy.REQUIRE)
+        public String processWithMatch(String id, String payload) {
+            return "result";
+        }
+
+        @Idempotent(key = "#id", requestMatch = RequestMatchStrategy.REQUIRE,
+                onConcurrent = ConcurrentStrategy.WAIT)
+        public String processWithMatchAndWait(String id, String payload) {
+            return "result";
+        }
     }
 
     private void setupSpelMethod(String methodName, Object... args) throws Exception {
@@ -94,6 +108,7 @@ class IdempotencyAspectTest {
     private Class<?>[] getParamTypes(String methodName) {
         return switch (methodName) {
             case "processById", "processWithOverrides", "processBothKeys", "processFailClosed", "processWithWait" -> new Class[]{String.class};
+            case "processWithMatch", "processWithMatchAndWait" -> new Class[]{String.class, String.class};
             case "processWithHeader", "processNoKey" -> new Class[]{};
             default -> new Class[]{};
         };
@@ -366,5 +381,90 @@ class IdempotencyAspectTest {
         aspect.handleIdempotent(joinPoint);
 
         verify(storage).store(eq("abc-123"), any(IdempotencyResult.class), eq(Duration.ofMinutes(1)));
+    }
+
+    @Test
+    void requestMatch_matchingHash_returnsCachedResult() throws Throwable {
+        setupSpelMethod("processWithMatch", "abc-123", "payload");
+        var cached = new IdempotencyResult("\"cached-result\"", "java.lang.String",
+                expectedHash("abc-123", "payload"));
+        when(storage.get("abc-123")).thenReturn(Optional.of(cached));
+
+        Object result = aspect.handleIdempotent(joinPoint);
+
+        assertThat(result).isEqualTo("cached-result");
+        verify(joinPoint, never()).proceed();
+    }
+
+    @Test
+    void requestMatch_differentHash_throwsMismatchException() throws Throwable {
+        setupSpelMethod("processWithMatch", "abc-123", "payload");
+        var cached = new IdempotencyResult("\"cached-result\"", "java.lang.String",
+                expectedHash("abc-123", "a-different-payload"));
+        when(storage.get("abc-123")).thenReturn(Optional.of(cached));
+
+        assertThatThrownBy(() -> aspect.handleIdempotent(joinPoint))
+                .isInstanceOf(IdempotencyMismatchException.class);
+        verify(joinPoint, never()).proceed();
+    }
+
+    @Test
+    void requestMatch_cacheMiss_storesRequestHash() throws Throwable {
+        setupSpelMethod("processWithMatch", "abc-123", "payload");
+        when(storage.get("abc-123")).thenReturn(Optional.empty());
+        when(storage.acquireLock(eq("abc-123"), any(Duration.class))).thenReturn("lock-token-123");
+        when(joinPoint.proceed()).thenReturn("fresh-result");
+
+        aspect.handleIdempotent(joinPoint);
+
+        ArgumentCaptor<IdempotencyResult> captor = ArgumentCaptor.forClass(IdempotencyResult.class);
+        verify(storage).store(eq("abc-123"), captor.capture(), any(Duration.class));
+        assertThat(captor.getValue().requestHash()).isEqualTo(expectedHash("abc-123", "payload"));
+    }
+
+    @Test
+    void requestMatch_legacyEntryWithNullHash_returnsCachedWithoutMismatch() throws Throwable {
+        setupSpelMethod("processWithMatch", "abc-123", "payload");
+        var cached = new IdempotencyResult("\"cached-result\"", "java.lang.String");
+        when(storage.get("abc-123")).thenReturn(Optional.of(cached));
+
+        Object result = aspect.handleIdempotent(joinPoint);
+
+        assertThat(result).isEqualTo("cached-result");
+    }
+
+    @Test
+    void requestMatchSkip_differentPayload_returnsCachedWithoutMismatch() throws Throwable {
+        setupSpelMethod("processById", "abc-123");
+        var cached = new IdempotencyResult("\"cached-result\"", "java.lang.String", "a-stale-hash");
+        when(storage.get("abc-123")).thenReturn(Optional.of(cached));
+
+        Object result = aspect.handleIdempotent(joinPoint);
+
+        assertThat(result).isEqualTo("cached-result");
+    }
+
+    @Test
+    void requestMatch_waitStrategy_differentHash_throwsMismatchException() throws Throwable {
+        properties.setWaitPollInitialInterval(Duration.ofMillis(50));
+        properties.setWaitPollMaxInterval(Duration.ofMillis(50));
+        properties.setWaitTimeout(Duration.ofSeconds(1));
+
+        setupSpelMethod("processWithMatchAndWait", "abc-123", "payload");
+        var cached = new IdempotencyResult("\"cached-result\"", "java.lang.String",
+                expectedHash("abc-123", "a-different-payload"));
+        when(storage.get("abc-123"))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(cached));
+        when(storage.acquireLock(eq("abc-123"), any(Duration.class))).thenReturn(null);
+
+        assertThatThrownBy(() -> aspect.handleIdempotent(joinPoint))
+                .isInstanceOf(IdempotencyMismatchException.class);
+    }
+
+    private String expectedHash(Object... args) throws Exception {
+        byte[] serialized = objectMapper.writeValueAsBytes(args);
+        byte[] digest = MessageDigest.getInstance("SHA-256").digest(serialized);
+        return HexFormat.of().formatHex(digest);
     }
 }

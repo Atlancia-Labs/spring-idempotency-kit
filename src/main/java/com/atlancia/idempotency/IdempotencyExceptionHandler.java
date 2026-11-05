@@ -18,6 +18,11 @@ public class IdempotencyExceptionHandler {
         return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
     }
 
+    @ExceptionHandler(IdempotencyMismatchException.class)
+    public ProblemDetail handleMismatchException(IdempotencyMismatchException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
+    }
+
     @ExceptionHandler(IdempotencyStorageException.class)
     public ProblemDetail handleStorageException(IdempotencyStorageException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());

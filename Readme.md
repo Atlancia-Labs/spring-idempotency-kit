@@ -16,8 +16,9 @@ Prevents duplicate operations in distributed systems — double payments, repeat
 - **Concurrent request handling** — configurable REJECT (409) or WAIT (with exponential backoff) strategy
 - **Failure strategies** — FAIL_OPEN (default) continues without idempotency on Redis outage, FAIL_CLOSED rejects requests
 - **Response caching** — repeated calls return the cached result without re-execution
+- **Request fingerprinting** — optionally reject replays that reuse a key with a different request payload (SHA-256 of the method arguments) → **422**
 - **Configurable TTL** — per-method or global defaults
-- **Micrometer metrics** — 13 metrics covering cache hits/misses, lock lifecycle, execution timing, storage errors, serialization failures, wait duration, and key count
+- **Micrometer metrics** — 14 metrics covering cache hits/misses, lock lifecycle, execution timing, storage errors, serialization failures, request mismatches, wait duration, and key count
 - **Auto-configuration** — zero boilerplate setup with Spring Boot
 
 ## Requirements
@@ -103,6 +104,7 @@ spring:
     default-time-unit: hours               # TTL unit (default: hours)
     default-on-concurrent: reject          # REJECT or WAIT (default: reject)
     default-on-failure: fail-open          # FAIL_OPEN or FAIL_CLOSED (default: fail-open)
+    default-request-match: skip            # REQUIRE or SKIP (default: skip)
     key-prefix: "idempotency:"             # Redis key prefix (default: "idempotency:")
     lock-timeout: 30s                      # Distributed lock TTL (default: 30s)
     wait-timeout: 10s                      # Max wait time for WAIT strategy (default: 10s)
@@ -118,7 +120,20 @@ public Response shortLivedOperation(String id) { ... }
 
 @Idempotent(key = "#id", onFailure = FailureStrategy.FAIL_CLOSED)
 public Response criticalPayment(String id) { ... }
+
+@Idempotent(key = "#request.id", requestMatch = RequestMatchStrategy.REQUIRE)
+public Response guardedPayment(PaymentRequest request) {
+    // reusing the same key with a different request body → 422
+}
 ```
+
+### Request payload matching
+
+With `requestMatch = REQUIRE` (or `default-request-match: require` globally), a cache hit additionally verifies that a SHA-256 hash of the current method arguments equals the hash stored with the original request. If they differ, the call is rejected with **422 Unprocessable Entity** instead of silently returning the original response — mirroring the behavior mandated by the IETF `Idempotency-Key` draft and Stripe.
+
+- Hashing covers **all method arguments** serialized as canonical JSON (map entries ordered by key for stability).
+- Disabled by default (`SKIP`), so existing behavior is unchanged.
+- Entries cached before matching was enabled store no hash and are never rejected.
 
 ## Error Handling
 
@@ -129,6 +144,7 @@ public Response criticalPayment(String id) { ... }
 | Both `key` and `headerName` set (or neither) | `IdempotencyConfigurationException` at invocation |
 | Concurrent duplicate (REJECT) | `IdempotencyConflictException` → **409 Conflict** |
 | Concurrent duplicate (WAIT, timeout) | `IdempotencyConflictException` → **409 Conflict** |
+| Key reused with a different request payload (requestMatch REQUIRE) | `IdempotencyMismatchException` → **422 Unprocessable Entity** |
 | Method throws exception | Lock released, result **not cached**, exception propagates |
 | Redis unavailable (FAIL_OPEN) | Method executes normally without idempotency, warning logged |
 | Redis unavailable (FAIL_CLOSED) | `IdempotencyStorageException` → **503 Service Unavailable** |
@@ -185,6 +201,7 @@ When Micrometer is on the classpath, the following metrics are recorded automati
 | `idempotency.storage.error` | Counter | `key_prefix`, `phase` | Storage layer failure (`phase`: `cache`, `lock`, or `store`) — fires regardless of fail-open/fail-closed |
 | `idempotency.wait.duration` | Timer | `key_prefix` | Time spent polling in WAIT concurrent strategy |
 | `idempotency.serialization.error` | Counter | `key_prefix` | Failed to serialize or deserialize a cached result |
+| `idempotency.mismatch` | Counter | `key_prefix` | Idempotency key reused with a request payload that doesn't match the stored one (requestMatch REQUIRE) |
 | `idempotency.keys.count` | Gauge | `key_prefix` | Number of idempotency keys currently stored (Redis uses SCAN; custom implementations can override `keyCount()`) |
 
 ## Architecture

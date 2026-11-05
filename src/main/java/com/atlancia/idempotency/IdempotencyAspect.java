@@ -1,6 +1,7 @@
 package com.atlancia.idempotency;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import jakarta.servlet.http.HttpServletRequest;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
@@ -17,7 +18,9 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.lang.reflect.Method;
+import java.security.MessageDigest;
 import java.time.Duration;
+import java.util.HexFormat;
 import java.util.Optional;
 
 @Aspect
@@ -28,6 +31,7 @@ public class IdempotencyAspect {
     private final IdempotencyStorage storage;
     private final IdempotencyProperties properties;
     private final ObjectMapper objectMapper;
+    private final ObjectMapper hashObjectMapper;
     private final IdempotencyMetrics metrics;
     private final ExpressionParser spelParser = new SpelExpressionParser();
     private final ParameterNameDiscoverer parameterNameDiscoverer = new DefaultParameterNameDiscoverer();
@@ -39,6 +43,8 @@ public class IdempotencyAspect {
         this.storage = storage;
         this.properties = properties;
         this.objectMapper = objectMapper;
+        this.hashObjectMapper = objectMapper.copy()
+                .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
         this.metrics = metrics;
     }
 
@@ -52,15 +58,22 @@ public class IdempotencyAspect {
         Duration ttl = properties.getResolvedTtl(annotation.ttl(), annotation.timeUnit());
         ConcurrentStrategy strategy = properties.getResolvedConcurrentStrategy(annotation.onConcurrent());
         FailureStrategy failureStrategy = properties.getResolvedFailureStrategy(annotation.onFailure());
+        RequestMatchStrategy requestMatch = properties.getResolvedRequestMatchStrategy(annotation.requestMatch());
+        String requestHash = requestMatch == RequestMatchStrategy.REQUIRE
+                ? computeRequestHash(joinPoint.getArgs())
+                : null;
 
         // Check cache
         try {
             Optional<IdempotencyResult> cached = storage.get(key);
             if (cached.isPresent()) {
+                verifyRequestMatch(requestMatch, cached.get(), requestHash, key);
                 log.debug("Idempotency cache hit for key={}, outcome=hit", key);
                 if (metrics != null) metrics.recordCacheHit();
                 return deserialize(cached.get(), method.getReturnType());
             }
+        } catch (IdempotencyMismatchException e) {
+            throw e;
         } catch (Exception e) {
             if (metrics != null) metrics.recordStorageError("cache");
             if (failureStrategy == FailureStrategy.FAIL_CLOSED) {
@@ -87,7 +100,7 @@ public class IdempotencyAspect {
 
         if (lockToken == null) {
             if (metrics != null) metrics.recordLockRejected();
-            return handleConcurrent(key, strategy, method.getReturnType());
+            return handleConcurrent(key, strategy, method.getReturnType(), requestMatch, requestHash);
         }
 
         if (metrics != null) {
@@ -123,7 +136,7 @@ public class IdempotencyAspect {
                 if (metrics != null) metrics.recordSerializationError();
                 throw new RuntimeException("Failed to serialize idempotency result", e);
             }
-            var idempotencyResult = new IdempotencyResult(serialized, method.getReturnType().getName());
+            var idempotencyResult = new IdempotencyResult(serialized, method.getReturnType().getName(), requestHash);
             try {
                 storage.store(key, idempotencyResult, ttl);
             } catch (Exception e) {
@@ -186,7 +199,8 @@ public class IdempotencyAspect {
         return value.toString();
     }
 
-    private Object handleConcurrent(String key, ConcurrentStrategy strategy, Class<?> returnType) {
+    private Object handleConcurrent(String key, ConcurrentStrategy strategy, Class<?> returnType,
+                                    RequestMatchStrategy requestMatch, String requestHash) {
         if (strategy == ConcurrentStrategy.REJECT) {
             log.debug("Idempotency concurrent reject for key={}, outcome=conflict, strategy=reject", key);
             if (metrics != null) metrics.recordConflict("reject");
@@ -203,6 +217,7 @@ public class IdempotencyAspect {
             while (System.currentTimeMillis() < deadline) {
                 Optional<IdempotencyResult> cached = storage.get(key);
                 if (cached.isPresent()) {
+                    verifyRequestMatch(requestMatch, cached.get(), requestHash, key);
                     log.debug("Idempotency wait resolved for key={}, outcome=hit", key);
                     if (metrics != null) metrics.recordCacheHit();
                     return deserialize(cached.get(), returnType);
@@ -221,6 +236,29 @@ public class IdempotencyAspect {
             throw new IdempotencyConflictException("Timeout waiting for idempotent result for key: " + key);
         } finally {
             if (waitSample != null) metrics.stopWaitTimer(waitSample);
+        }
+    }
+
+    private void verifyRequestMatch(RequestMatchStrategy requestMatch, IdempotencyResult cached,
+                                    String requestHash, String key) {
+        if (requestMatch == RequestMatchStrategy.REQUIRE
+                && cached.requestHash() != null
+                && !cached.requestHash().equals(requestHash)) {
+            log.debug("Idempotency request mismatch for key={}, outcome=mismatch", key);
+            if (metrics != null) metrics.recordMismatch();
+            throw new IdempotencyMismatchException(
+                    "Idempotency key reused with a different request payload: " + key);
+        }
+    }
+
+    private String computeRequestHash(Object[] args) {
+        try {
+            byte[] serialized = hashObjectMapper.writeValueAsBytes(args);
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(serialized);
+            return HexFormat.of().formatHex(digest);
+        } catch (Exception e) {
+            if (metrics != null) metrics.recordSerializationError();
+            throw new RuntimeException("Failed to compute idempotency request hash", e);
         }
     }
 

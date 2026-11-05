@@ -64,6 +64,13 @@ class IdempotencyMetricsTest {
     }
 
     @Test
+    void recordMismatch_incrementsCounter() {
+        metrics.recordMismatch();
+        assertThat(registry.counter("idempotency.mismatch", "key_prefix", "idempotency:").count())
+                .isEqualTo(1.0);
+    }
+
+    @Test
     void executionTimer_recordsDuration() throws Exception {
         String result = metrics.recordExecution(() -> "done");
         assertThat(result).isEqualTo("done");

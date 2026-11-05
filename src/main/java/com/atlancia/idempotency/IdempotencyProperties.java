@@ -17,6 +17,7 @@ public class IdempotencyProperties {
     private Duration waitPollInitialInterval = Duration.ofMillis(100);
     private Duration waitPollMaxInterval = Duration.ofSeconds(1);
     private FailureStrategy defaultOnFailure = FailureStrategy.FAIL_OPEN;
+    private RequestMatchStrategy defaultRequestMatch = RequestMatchStrategy.SKIP;
 
     public long getDefaultTtl() {
         return defaultTtl;
@@ -119,5 +120,20 @@ public class IdempotencyProperties {
             return annotationStrategy;
         }
         return defaultOnFailure;
+    }
+
+    public RequestMatchStrategy getDefaultRequestMatch() {
+        return defaultRequestMatch;
+    }
+
+    public void setDefaultRequestMatch(RequestMatchStrategy defaultRequestMatch) {
+        this.defaultRequestMatch = defaultRequestMatch;
+    }
+
+    public RequestMatchStrategy getResolvedRequestMatchStrategy(RequestMatchStrategy annotationStrategy) {
+        if (annotationStrategy != RequestMatchStrategy.DEFAULT) {
+            return annotationStrategy;
+        }
+        return defaultRequestMatch;
     }
 }

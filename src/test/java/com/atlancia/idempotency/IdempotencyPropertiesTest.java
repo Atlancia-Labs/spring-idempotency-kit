@@ -67,6 +67,22 @@ class IdempotencyPropertiesTest {
     }
 
     @Test
+    void resolvedRequestMatch_usesAnnotationWhenNotDefault() {
+        RequestMatchStrategy resolved = properties.getResolvedRequestMatchStrategy(RequestMatchStrategy.REQUIRE);
+
+        assertThat(resolved).isEqualTo(RequestMatchStrategy.REQUIRE);
+    }
+
+    @Test
+    void resolvedRequestMatch_usesGlobalDefaultWhenDefault() {
+        properties.setDefaultRequestMatch(RequestMatchStrategy.REQUIRE);
+
+        RequestMatchStrategy resolved = properties.getResolvedRequestMatchStrategy(RequestMatchStrategy.DEFAULT);
+
+        assertThat(resolved).isEqualTo(RequestMatchStrategy.REQUIRE);
+    }
+
+    @Test
     void defaults_areCorrect() {
         assertThat(properties.getDefaultTtl()).isEqualTo(24);
         assertThat(properties.getDefaultTimeUnit()).isEqualTo(TimeUnit.HOURS);
@@ -77,5 +93,6 @@ class IdempotencyPropertiesTest {
         assertThat(properties.getWaitTimeout()).isEqualTo(Duration.ofSeconds(10));
         assertThat(properties.getWaitPollInitialInterval()).isEqualTo(Duration.ofMillis(100));
         assertThat(properties.getWaitPollMaxInterval()).isEqualTo(Duration.ofSeconds(1));
+        assertThat(properties.getDefaultRequestMatch()).isEqualTo(RequestMatchStrategy.SKIP);
     }
 }
